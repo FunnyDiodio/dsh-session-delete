@@ -5,7 +5,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OWNER/dsh-session-delete.git"
+    "url": "git+https://github.com/FunnyDiodio/dsh-session-delete.git"
+  },
+  "homepage": "https://github.com/FunnyDiodio/dsh-session-delete#readme",
+  "bugs": {
+    "url": "https://github.com/FunnyDiodio/dsh-session-delete/issues"
   },
   "keywords": [
     "dsh",
@@ -32,6 +36,7 @@
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",
+    "LICENSE",
     "README.md"
   ],
   "dsh": {

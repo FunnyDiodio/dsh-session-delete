@@ -48,11 +48,13 @@ English | 中文（下文为主，文末有 English summary）
 
 ## 安装
 
+设置 → 插件 → 市场（Discover）搜索 `dsh-session-delete`（收录合并后），或命令行：
+
 ```bash
-# 发布到 GitHub / npm 后（命令以市场页展示为准）：
-dsh plugin add dsh-session-delete                 # npm 源
-dsh plugin add github:<owner>/dsh-session-delete   # GitHub 源
+dsh plugin add github:FunnyDiodio/dsh-session-delete
 ```
+
+（桌面端在 profile 上执行即可；安装后重启或按提示重载生效。）
 
 要求 **DSH ≥ 0.2.1-rc.1**（`dsh.bundle` 协议 + 会话菜单插槽均自该线可用）。
 适用：DSH NEXT、官方桌面端及任何内置 dsh Web GUI 的第三方客户端；纯 CLI / headless 宿主没有侧栏 UI，装了不会显示。
@@ -79,7 +81,7 @@ dsh plugin add github:<owner>/dsh-session-delete   # GitHub 源
 
 ## License
 
-MIT（正式发布前在本目录补 LICENSE 文件）
+MIT — 见 [LICENSE](LICENSE)。
 
 ---
 
