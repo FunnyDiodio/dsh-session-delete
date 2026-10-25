@@ -9,7 +9,7 @@
  * host route.
  */
 window.__ModuleLoader__.load({
-  id: 'dsh-session-delete',
+  id: '@funny_diodio/dsh-session-delete',
   factory(require) {
     const React = require('react');
     const h = React.createElement;
