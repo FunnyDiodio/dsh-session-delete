@@ -250,7 +250,10 @@ window.__ModuleLoader__.load({
           h('div', { className: `${CSS_PREFIX}__modalBody` },
             deleting ? h('div', { className: `${CSS_PREFIX}__status`, role: 'status' }, t('delete.pending')) : null,
             error !== null ? h('div', { className: `${CSS_PREFIX}__error`, role: 'alert' }, error) : null,
-            !deleting && error === null && h('label', { className: `${CSS_PREFIX}__forceLabel` },
+            // The force checkbox stays visible beside any refusal (notably
+            // live-session): the refusal IS the moment force helps, so
+            // hiding it forces a close-and-reopen cycle to recover.
+            !deleting && h('label', { className: `${CSS_PREFIX}__forceLabel` },
               h('input', {
                 type: 'checkbox',
                 checked: force,
