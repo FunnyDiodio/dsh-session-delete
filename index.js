@@ -267,25 +267,33 @@ export function apply(ctx) {
           const sessionId = assertPayload(body);
           const force = body.force === true;
 
-          // If the session is live and the caller requests force, stop the
-          // session's activity first (same as "archive and stop" does). This
-          // avoids the "live-session" refusal without silently skipping the
-          // guard (which previously caused ghost rows under "Ungrouped").
+          // A session live in this process (its tab is open, an Agent may be
+          // attached) is ALWAYS refused — force included. The only clean exit
+          // for a live session is its client closing the tab, which natively
+          // cancels work, releases the persistence handle, and emits
+          // `session/disposed` → `api-session/removed`. v1.1 let force delete
+          // under a live session and left ghost "Ungrouped" rows on desktop
+          // and phone alike; this guard restores the invariant.
           if (isLiveSession(ctx, sessionId)) {
-            if (force) {
-              await stopSessionActivity(ctx, sessionId);
-              // After stopping, re-check activity (the parallel event should
-              // have cleared it). If something is still running we fall
-              // through to the activity guard below.
-            } else {
-              send(409, { ok: false, error: 'live-session', message: 'session is live in this process' });
-              return;
-            }
+            let running = false;
+            try {
+              running = ctx.get('agents')?.get(sessionId)?.status === 'running';
+            } catch { /* unreadable status stays open-tab */ }
+            send(409, {
+              ok: false,
+              error: running ? 'live-running' : 'open-tab',
+              message: running ? 'agent is running' : 'session tab is open',
+            });
+            return;
           }
           if (await isPendingSession(ctx, sessionId)) {
             send(409, { ok: false, error: 'pending-session', message: 'session has an unmaterialized write handle' });
             return;
           }
+          // force now means exactly what "stop and archive" means: stop the
+          // session's background WORK (subagents, jobs, schedules), then the
+          // activity guard must read clear before the delete continues.
+          if (force) await stopSessionActivity(ctx, sessionId);
           const activity = await sessionActivity(ctx, sessionId);
           if (activity.length > 0) {
             send(409, { ok: false, error: 'activity', message: `session has ${activity.length} active item(s)` });
