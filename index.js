@@ -164,24 +164,27 @@ function isLiveSession(ctx, sessionId) {
  * @returns true once the session is out of the live catalog.
  */
 async function releaseLiveSession(ctx, sessionId) {
+  const agent = ctx.get('agents')?.get(sessionId);
+  ctx.logger?.info?.(`[${NS}] release attempt for '${sessionId}': agent=${agent === void 0 ? 'absent (view-only session; the client-side main-view release drives the un-retain)' : 'present'}, dispose=${agent !== void 0 && typeof agent.dispose === 'function' ? 'agent.dispose' : agent !== void 0 && typeof agent.ctx?.dispose === 'function' ? 'agent.ctx.dispose' : 'unavailable'}`);
   try {
-    const agent = ctx.get('agents')?.get(sessionId);
     if (agent !== void 0) {
       // Either public exit works: the driver's own dispose, or disposing the
       // agent's scoped context (whose registered teardown runs the same
       // cancel → close-handle → detach chain). Awaited: dispose settles after
-      // the loop reaches quiescence.
+      // the loop reaches quiescence. For a view-only session (no Agent) the
+      // live entry rides the client's un-retain round trip instead — the
+      // settle window below covers that race.
       if (typeof agent.dispose === 'function') await agent.dispose();
       else if (typeof agent.ctx?.dispose === 'function') await agent.ctx.dispose();
     }
   } catch (error) {
     ctx.logger?.warn?.(`[${NS}] releasing live session '${sessionId}' failed: ${String(error?.message ?? error)}`);
   }
-  // The dispose awaits quiescence, but store removal rides the disposal
-  // listener chain; give it a bounded settle window before declaring.
-  for (let attempt = 0; attempt < 20; attempt++) {
+  // Store removal rides the disposal/un-retain listener chain (local emit or
+  // a loopback remote call); give it a bounded settle window before declaring.
+  for (let attempt = 0; attempt < 40; attempt++) {
     if (!isLiveSession(ctx, sessionId)) return true;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return !isLiveSession(ctx, sessionId);
 }

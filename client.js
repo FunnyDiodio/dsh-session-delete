@@ -172,7 +172,7 @@ window.__ModuleLoader__.load({
      * one confirmation dialog. Markup mirrors the host Modal primitive
      * (renamed classes under this plugin's prefix; only --dsw-alias-* tokens).
      */
-    function DeleteSessionOverlay() {
+    function DeleteSessionOverlay(props) {
       const request = React.useSyncExternalStore(
         (onStoreChange) => requestStore.subscribe(onStoreChange),
         () => requestStore.getSnapshot(),
@@ -180,6 +180,14 @@ window.__ModuleLoader__.load({
       const [deleting, setDeleting] = React.useState(false);
       const [error, setError] = React.useState(null);
       const [force, setForce] = React.useState(false);
+      // Standard slot hook from the shell: is THIS page's main view holding
+      // the pending session open? (Force delete silently releases it first.)
+      const openHere = typeof props.useSessions === 'function' && request !== null
+        ? props.useSessions((s) => {
+            const row = s.byId[request.sessionId];
+            return row !== void 0 && (row.retainedBy?.mainView ?? 0) > 0;
+          })
+        : false;
 
       // Reset the transient dialog state whenever a new request arrives.
       React.useEffect(() => {
@@ -202,27 +210,57 @@ window.__ModuleLoader__.load({
         requestStore.set(null);
       };
 
+      const waitMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+      // One delete attempt; on a force-request that the host refused for a
+      // still-held session, silently release the main view first (the same
+      // un-retain the user's own tab-close performs — no user concept), then
+      // retry with a settle delay. Stage caps at 2 to keep failures honest.
+      const attemptDelete = async (stage) => {
+        try {
+          await callDelete(request.sessionId, force);
+          requestStore.set(null);
+        } catch (reason) {
+          const code = reason?.code;
+          const held = code === 'release-failed' || code === 'live-session';
+          if (force && held && stage === 0) {
+            try { props.layout?.selectPanel?.(null); } catch { /* retry still may land */ }
+            await waitMs(500);
+            return attemptDelete(1);
+          }
+          if (force && held && stage === 1) {
+            await waitMs(1200);
+            return attemptDelete(2);
+          }
+          setDeleting(false);
+          if (code === 'live-session') setError(t('delete.errorLive'));
+          else if (held) setError(t('delete.errorRelease'));
+          else if (code === 'activity') setError(t('delete.errorActivity'));
+          else if (code === 'pending-session') setError(t('delete.errorPending'));
+          else if (code === 'disk-remove-failed') setError(t('delete.errorDisk'));
+          else if (code === 'not-found') setError(t('delete.errorNotFound'));
+          // any other failure: the server message is the most honest text we
+          // have; show it verbatim.
+          else setError(reason instanceof Error ? reason.message : String(reason));
+        }
+      };
+
       const confirm = () => {
         if (deleting) return;
         setDeleting(true);
         setError(null);
-        callDelete(request.sessionId, force)
-          .then(() => {
-            requestStore.set(null);
-          })
-          .catch((reason) => {
-            setDeleting(false);
-            const code = reason?.code;
-            if (code === 'live-session') setError(t('delete.errorLive'));
-            else if (code === 'release-failed') setError(t('delete.errorRelease'));
-            else if (code === 'activity') setError(t('delete.errorActivity'));
-            else if (code === 'pending-session') setError(t('delete.errorPending'));
-            else if (code === 'disk-remove-failed') setError(t('delete.errorDisk'));
-            else if (code === 'not-found') setError(t('delete.errorNotFound'));
-            // 'catalog-unavailable' and any other failure: the server message
-            // is the most honest text we have; show it verbatim.
-            else setError(reason instanceof Error ? reason.message : String(reason));
-          });
+        // Proactive silent release: the session is open in THIS page's main
+        // view and the caller forced the delete — release before the first
+        // attempt instead of eating a guaranteed 409 round-trip.
+        if (force && openHere) {
+          (async () => {
+            try { props.layout?.selectPanel?.(null); } catch { /* first attempt reports */ }
+            await waitMs(500);
+            await attemptDelete(1);
+          })();
+          return;
+        }
+        attemptDelete(0);
       };
 
       return h('div', { className: `${CSS_PREFIX}__modalRoot` },
@@ -480,7 +518,7 @@ window.__ModuleLoader__.load({
     let seq = 0;
 
     return {
-      inject: ['slots', 'locale'],
+      inject: ['slots', 'locale', 'layout'],
       apply(ctx) {
         requestStore = createStore(null);
         seq = 0;
@@ -536,11 +574,15 @@ window.__ModuleLoader__.load({
           }),
         }, DeleteSessionMenuItem));
 
-        // The confirmation dialog over the whole frame.
+        // The confirmation dialog over the whole frame. `layout` rides in as
+        // the entry's business share so a force delete can silently release
+        // this page's main view (selectPanel(null)) — the same un-retain the
+        // user's own tab-close performs — instead of eating a refusal.
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
           id: 'session-delete-confirm',
           order: 30,
+          inject: () => ({ layout: ctx.get('layout') }),
         }, DeleteSessionOverlay));
       },
     };
