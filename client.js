@@ -49,7 +49,7 @@ window.__ModuleLoader__.load({
       zh: {
         'menu.delete': '删除会话',
         'delete.title': '删除此会话？',
-        'delete.desc': '“{title}”将被从工作区中移除，其会话记录与投影缓存将被永久删除。此操作不可撤销。',
+        'delete.desc': '“{title}”的对话记录将被永久删除、无法找回（该会话生成的工作区文件不受影响，会保留）。删除前请先让该会话把重要结论存成文件，或导出日志。',
         'delete.forceLabel': '强制删除（先停止该会话的所有后台工作）',
         'delete.action': '删除',
         'delete.pending': '正在删除会话…',
@@ -64,7 +64,7 @@ window.__ModuleLoader__.load({
       en: {
         'menu.delete': 'Delete session',
         'delete.title': 'Delete this session?',
-        'delete.desc': '"{title}" will be removed from the workspace and its session log and projection cache will be permanently deleted. This cannot be undone.',
+        'delete.desc': '"{title}"\'s conversation log will be permanently deleted and cannot be recovered (files it created in the workspace are kept). Before deleting, have the session save important conclusions to a file, or export its log.',
         'delete.forceLabel': 'Force delete (stop all background work first)',
         'delete.action': 'Delete',
         'delete.pending': 'Deleting session…',

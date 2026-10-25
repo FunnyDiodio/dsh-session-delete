@@ -1,11 +1,11 @@
 {
   "meta": {
     "title": "Delete Session",
-    "description": "Adds a Delete Session row to the sidebar session '...' menu: after confirmation the session is detached from its workspace and its session log and projection cache are permanently removed."
+    "description": "Adds a Delete Session row to the sidebar session '...' menu: after confirmation the session log and projection cache are permanently removed (workspace files the session created are kept). Back up anything important before deleting."
   },
   "menu.delete": "Delete session",
   "delete.title": "Delete this session?",
-  "delete.desc": "\"{title}\" will be removed from the workspace and its session log and projection cache will be permanently deleted. This cannot be undone.",
+  "delete.desc": "\"{title}\"'s conversation log will be permanently deleted and cannot be recovered (files it created in the workspace are kept). Before deleting, have the session save important conclusions to a file, or export its log.",
   "delete.action": "Delete",
   "delete.pending": "Deleting session…",
   "delete.errorActivity": "This session still has work in progress. Stop it before deleting.",
