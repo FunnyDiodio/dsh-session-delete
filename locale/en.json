@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "title": "Delete Session",
+    "description": "Adds a Delete Session row to the sidebar session '...' menu: after confirmation the session is detached from its workspace and its session log and projection cache are permanently removed."
+  },
+  "menu.delete": "Delete session",
+  "delete.title": "Delete this session?",
+  "delete.desc": "\"{title}\" will be removed from the workspace and its session log and projection cache will be permanently deleted. This cannot be undone.",
+  "delete.action": "Delete",
+  "delete.pending": "Deleting session…",
+  "delete.errorActivity": "This session still has work in progress. Stop it before deleting.",
+  "delete.errorLive": "This session is running or still open. Close its tab first.",
+  "delete.errorPending": "This session still has unmaterialized content. Close its tab or retry shortly.",
+  "delete.errorDisk": "The session log could not be removed; the registry was left untouched. Retry shortly.",
+  "delete.errorNotFound": "No session record was found; it may already be deleted.",
+  "cancel": "Cancel",
+  "close": "Close"
+}

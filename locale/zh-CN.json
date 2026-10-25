@@ -1,0 +1,18 @@
+{
+  "meta": {
+    "title": "会话删除",
+    "description": "在侧边栏会话“…”菜单中加入“删除会话”：确认后从工作区移除该会话，并永久删除其会话记录与投影缓存。"
+  },
+  "menu.delete": "删除会话",
+  "delete.title": "删除此会话？",
+  "delete.desc": "“{title}”将被从工作区中移除，其会话记录与投影缓存将被永久删除。此操作不可撤销。",
+  "delete.action": "删除",
+  "delete.pending": "正在删除会话…",
+  "delete.errorActivity": "该会话仍有正在进行的工作，请先停止后再删除。",
+  "delete.errorLive": "该会话正在运行或仍被打开，请先关闭它的标签页。",
+  "delete.errorPending": "该会话还有未落盘的内容，请先关闭它的标签页或稍后再试。",
+  "delete.errorDisk": "会话记录文件删除失败，注册表未被修改，请稍后重试。",
+  "delete.errorNotFound": "未找到该会话的记录，可能已被删除。",
+  "cancel": "取消",
+  "close": "关闭"
+}
