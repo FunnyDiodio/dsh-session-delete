@@ -155,28 +155,22 @@ function isLiveSession(ctx, sessionId) {
 }
 
 /**
- * Force-release a live session through its own Agent's public teardown — the
- * same exit a client tab-close drives: abort running work, await quiescence,
- * close the persistence handle, and detach the session from the live catalog.
+ * Force-release a live session. The primary path is the caller's client:
+ * a force delete silently releases this page's main view first (the same
+ * un-retain a tab close drives), and the settle window below waits for that
+ * round trip to land in this process. Secondary: an Agent object that
+ * exposes its own public `dispose`. NEVER probe `agent.ctx.<anything>` — the
+ * Cordis context proxy throws `cannot get property "x" without inject` for
+ * undeclared names, even under typeof.
  * The native `session/disposed` → `api-session/removed` chain drops the row
- * from every connected client (desktop sidebar and the phone bridge) as part
- * of the release, so the disk sweep afterwards can never strand a ghost row.
+ * from every connected client as part of the release, so the disk sweep
+ * afterwards can never strand a ghost row.
  * @returns true once the session is out of the live catalog.
  */
 async function releaseLiveSession(ctx, sessionId) {
-  const agent = ctx.get('agents')?.get(sessionId);
-  ctx.logger?.info?.(`[${NS}] release attempt for '${sessionId}': agent=${agent === void 0 ? 'absent (view-only session; the client-side main-view release drives the un-retain)' : 'present'}, dispose=${agent !== void 0 && typeof agent.dispose === 'function' ? 'agent.dispose' : agent !== void 0 && typeof agent.ctx?.dispose === 'function' ? 'agent.ctx.dispose' : 'unavailable'}`);
   try {
-    if (agent !== void 0) {
-      // Either public exit works: the driver's own dispose, or disposing the
-      // agent's scoped context (whose registered teardown runs the same
-      // cancel → close-handle → detach chain). Awaited: dispose settles after
-      // the loop reaches quiescence. For a view-only session (no Agent) the
-      // live entry rides the client's un-retain round trip instead — the
-      // settle window below covers that race.
-      if (typeof agent.dispose === 'function') await agent.dispose();
-      else if (typeof agent.ctx?.dispose === 'function') await agent.ctx.dispose();
-    }
+    const agent = ctx.get('agents')?.get(sessionId);
+    if (agent !== void 0 && typeof agent.dispose === 'function') await agent.dispose();
   } catch (error) {
     ctx.logger?.warn?.(`[${NS}] releasing live session '${sessionId}' failed: ${String(error?.message ?? error)}`);
   }
