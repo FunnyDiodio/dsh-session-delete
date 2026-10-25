@@ -182,9 +182,15 @@ window.__ModuleLoader__.load({
       const [force, setForce] = React.useState(false);
       // Standard slot hook from the shell: is THIS page's main view holding
       // the pending session open? (Force delete silently releases it first.)
-      const openHere = typeof props.useSessions === 'function' && request !== null
+      // Call the hook UNCONDITIONALLY every render (Rules of Hooks: a
+      // conditional hook call crashes the entry — the abdicated entry then
+      // never renders the dialog again). The null check lives inside the
+      // selector instead.
+      const pendingRequest = request;
+      const openHere = typeof props.useSessions === 'function'
         ? props.useSessions((s) => {
-            const row = s.byId[request.sessionId];
+            if (pendingRequest === null) return false;
+            const row = s.byId[pendingRequest.sessionId];
             return row !== void 0 && (row.retainedBy?.mainView ?? 0) > 0;
           })
         : false;
