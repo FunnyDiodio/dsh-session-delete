@@ -72,13 +72,14 @@ dsh plugin add github:FunnyDiodio/dsh-session-delete      # GitHub 源
   （force 时 `workspace/session-stop` 停后台工作）→ activity → 磁盘删除（日志目录 + 投影缓存）→
   注册表内存索引逐出 → unarchive / unpin / detach → `emit api-session/removed`
 - **Client**（`client.js`）：`window.__ModuleLoader__` 注册；菜单行 `sidebar.workspaces.session.menu.item`
-  order 420（archive=400 与 session-id=450 之间）；确认框走 `shell.overlay`；样式全部取自
-  `--dsw-alias-*` 主题令牌，明暗色自适应；文案 zh/en 自管 + 注册进 locale 服务
+  order 420（archive=400 与 session-id=450 之间）；确认框走 `shell.overlay`；强制删除且该会话
+  正显示在本页主视图时，先静默释放主视图（与用户手动关标签页同一条 un-retain 路径）再删，
+  用户零感知；样式全部取自 `--dsw-alias-*` 主题令牌，明暗色自适应；文案 zh/en 自管 + 注册进 locale 服务
 - 路径编码与 `dsh-session-persistence-jsonl` 保持一致（`projectKey` / `encodeSegment`），
   header 缺失时按 id 清扫全部项目目录兜底
 - 版本线：v1.0.0 首发（新家 + 正式包名）；v1.1.0 复选框在错误下保持可见；
-  v1.2.0 force 语义升级为「自动释放内存态会话后一步删净」（修复 force 拆盘在桌面/手机留幽灵行），
-  UI 回到单复选框形态，无新增交互概念
+  v1.2.0 force 语义升级为「自动释放内存态会话后一步删净」；v1.2.1 发布定型（scoped npm 名）；
+  v1.2.2 修复"开着标签页强制删除被拒"：客户端静默释放主视图 + 重试，宿主释放窗口加宽至 4s
 
 ## License
 
