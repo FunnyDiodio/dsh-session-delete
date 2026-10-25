@@ -1,19 +1,18 @@
 {
   "meta": {
     "title": "Delete Session",
-    "description": "Adds a Delete Session row to the sidebar session '...' menu: after confirmation the session log and projection cache are permanently removed (workspace files the session created are kept). Back up anything important before deleting."
+    "description": "Adds a Delete Session row to the sidebar session '...' menu: after confirmation the session log and projection cache are permanently removed (workspace files the session created are kept). Tick Force delete for a running or open session; back up anything important before deleting."
   },
   "menu.delete": "Delete session",
   "delete.title": "Delete this session?",
   "delete.desc": "\"{title}\"'s conversation log will be permanently deleted and cannot be recovered (files it created in the workspace are kept). Before deleting, have the session save important conclusions to a file, or export its log.",
+  "delete.forceLabel": "Force delete (stop its work and background tasks, then delete outright)",
   "delete.action": "Delete",
   "delete.pending": "Deleting session…",
-  "delete.errorActivity": "This session still has background work. Check Force delete to stop it, or stop the work first.",
-  "delete.errorLive": "This session tab is still open. Close it and the delete will work.",
-  "delete.errorRunning": "This session is generating a reply. Stop it (top-right) or close its tab first.",
-  "delete.errorPending": "This session still has unmaterialized content. Close its tab or retry shortly.",
-  "delete.closeTab": "Close its tab",
-  "delete.closeTabHint": "(switches to a blank view; close any other tabs holding this session manually)",
+  "delete.errorActivity": "This session still has work in progress; tick Force delete to stop it and delete outright.",
+  "delete.errorLive": "This session is running or still open; tick Force delete to delete it outright.",
+  "delete.errorRelease": "This session is held open by its tab and could not be released automatically. Close the tab and retry.",
+  "delete.errorPending": "This session still has unmaterialized content. Retry shortly.",
   "delete.errorDisk": "The session log could not be removed; the registry was left untouched. Retry shortly.",
   "delete.errorNotFound": "No session record was found; it may already be deleted.",
   "cancel": "Cancel",

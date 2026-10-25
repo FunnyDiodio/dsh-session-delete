@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-delete",
   "version": "1.2.0",
-  "description": "Adds a Delete Session row to the sidebar session '...' menu: a confirm dialog with a force option, then the session log, projection cache and registry bookkeeping are permanently removed. Workspace files created in the session are kept.",
+  "description": "Adds a Delete Session row to the sidebar session '...' menu: a confirm dialog with a one-click Force delete that releases the session from memory, stops its work, and removes the log, projection cache and registry bookkeeping with no ghost rows left. Workspace files created in the session are kept.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -42,8 +42,7 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-ui-workspace",
-        "@deepseek-ai/dsh-client-ui-conversation",
-        "@deepseek-ai/dsh-client-ui-layout"
+        "@deepseek-ai/dsh-client-ui-conversation"
       ]
     }
   }

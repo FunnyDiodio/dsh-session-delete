@@ -155,6 +155,38 @@ function isLiveSession(ctx, sessionId) {
 }
 
 /**
+ * Force-release a live session through its own Agent's public teardown — the
+ * same exit a client tab-close drives: abort running work, await quiescence,
+ * close the persistence handle, and detach the session from the live catalog.
+ * The native `session/disposed` → `api-session/removed` chain drops the row
+ * from every connected client (desktop sidebar and the phone bridge) as part
+ * of the release, so the disk sweep afterwards can never strand a ghost row.
+ * @returns true once the session is out of the live catalog.
+ */
+async function releaseLiveSession(ctx, sessionId) {
+  try {
+    const agent = ctx.get('agents')?.get(sessionId);
+    if (agent !== void 0) {
+      // Either public exit works: the driver's own dispose, or disposing the
+      // agent's scoped context (whose registered teardown runs the same
+      // cancel → close-handle → detach chain). Awaited: dispose settles after
+      // the loop reaches quiescence.
+      if (typeof agent.dispose === 'function') await agent.dispose();
+      else if (typeof agent.ctx?.dispose === 'function') await agent.ctx.dispose();
+    }
+  } catch (error) {
+    ctx.logger?.warn?.(`[${NS}] releasing live session '${sessionId}' failed: ${String(error?.message ?? error)}`);
+  }
+  // The dispose awaits quiescence, but store removal rides the disposal
+  // listener chain; give it a bounded settle window before declaring.
+  for (let attempt = 0; attempt < 20; attempt++) {
+    if (!isLiveSession(ctx, sessionId)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return !isLiveSession(ctx, sessionId);
+}
+
+/**
  * Whether the persistence backend still tracks this session as created but
  * unmaterialized in this process. Such a session exists only in the
  * backend's pending map — a filesystem rm finds nothing, and the pending
@@ -267,32 +299,30 @@ export function apply(ctx) {
           const sessionId = assertPayload(body);
           const force = body.force === true;
 
-          // A session live in this process (its tab is open, an Agent may be
-          // attached) is ALWAYS refused — force included. The only clean exit
-          // for a live session is its client closing the tab, which natively
-          // cancels work, releases the persistence handle, and emits
-          // `session/disposed` → `api-session/removed`. v1.1 let force delete
-          // under a live session and left ghost "Ungrouped" rows on desktop
-          // and phone alike; this guard restores the invariant.
+          // A session live in this process (its tab is open / an Agent is
+          // attached) may not have its log pulled out from under the open
+          // persistence handle — v1.1 did exactly that and stranded ghost
+          // "Ungrouped" rows on desktop and phone alike. With force the
+          // plugin now RELEASES the session through the Agent's own public
+          // teardown first (same path a tab close drives; clients drop the
+          // row during the release) and only then deletes; without force a
+          // live session is refused.
           if (isLiveSession(ctx, sessionId)) {
-            let running = false;
-            try {
-              running = ctx.get('agents')?.get(sessionId)?.status === 'running';
-            } catch { /* unreadable status stays open-tab */ }
-            send(409, {
-              ok: false,
-              error: running ? 'live-running' : 'open-tab',
-              message: running ? 'agent is running' : 'session tab is open',
-            });
-            return;
+            if (!force) {
+              send(409, { ok: false, error: 'live-session', message: 'session is live in this process' });
+              return;
+            }
+            if (!(await releaseLiveSession(ctx, sessionId))) {
+              send(409, { ok: false, error: 'release-failed', message: 'session is held open by its tab and could not be released; close the tab and retry' });
+              return;
+            }
           }
           if (await isPendingSession(ctx, sessionId)) {
             send(409, { ok: false, error: 'pending-session', message: 'session has an unmaterialized write handle' });
             return;
           }
-          // force now means exactly what "stop and archive" means: stop the
-          // session's background WORK (subagents, jobs, schedules), then the
-          // activity guard must read clear before the delete continues.
+          // force also stops the session's background WORK (subagents, jobs,
+          // schedules) — the same event the native "stop and archive" drives.
           if (force) await stopSessionActivity(ctx, sessionId);
           const activity = await sessionActivity(ctx, sessionId);
           if (activity.length > 0) {

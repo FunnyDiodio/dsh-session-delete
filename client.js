@@ -50,15 +50,13 @@ window.__ModuleLoader__.load({
         'menu.delete': '删除会话',
         'delete.title': '删除此会话？',
         'delete.desc': '“{title}”的对话记录将被永久删除、无法找回（该会话生成的工作区文件不受影响，会保留）。删除前请先让该会话把重要结论存成文件，或导出日志。',
-        'delete.forceLabel': '强制删除（先停止该会话的所有后台工作）',
+        'delete.forceLabel': '强制删除（停止其工作与后台任务，直接彻底删除）',
         'delete.action': '删除',
         'delete.pending': '正在删除会话…',
-        'delete.errorActivity': '该会话仍有正在进行的工作，请勾选强制删除后重试，或先停止这些工作。',
-        'delete.errorLive': '这个会话的标签页还开着，关掉它就能删除。',
-        'delete.errorRunning': '该会话正在生成回复；可先点右上角停止，或关闭标签页后再删除。',
-        'delete.errorPending': '该会话还有未落盘的内容，请先关闭它的标签页或稍后再试。',
-        'delete.closeTab': '去关闭标签页',
-        'delete.closeTabHint': '（将切回空白页；其他标签页里的该会话请手动关闭）',
+        'delete.errorActivity': '该会话仍有正在进行的工作；勾选「强制删除」可直接停止并删除。',
+        'delete.errorLive': '该会话正在运行或仍被打开；勾选「强制删除」可直接删除。',
+        'delete.errorRelease': '该会话被其标签页占用且无法自动释放，请关闭该标签页后重试。',
+        'delete.errorPending': '该会话还有未落盘的内容，请稍后重试。',
         'delete.errorDisk': '会话记录文件删除失败，注册表未被修改，请稍后重试。',
         'delete.errorNotFound': '未找到该会话的记录，可能已被删除。',
         cancel: '取消',
@@ -68,15 +66,13 @@ window.__ModuleLoader__.load({
         'menu.delete': 'Delete session',
         'delete.title': 'Delete this session?',
         'delete.desc': '"{title}"\'s conversation log will be permanently deleted and cannot be recovered (files it created in the workspace are kept). Before deleting, have the session save important conclusions to a file, or export its log.',
-        'delete.forceLabel': 'Force delete (stop all background work first)',
+        'delete.forceLabel': 'Force delete (stop its work and background tasks, then delete outright)',
         'delete.action': 'Delete',
         'delete.pending': 'Deleting session…',
-        'delete.errorActivity': 'This session still has background work. Check Force delete to stop it, or stop the work first.',
-        'delete.errorLive': 'This session tab is still open. Close it and the delete will work.',
-        'delete.errorRunning': 'This session is generating a reply. Stop it (top-right) or close its tab first.',
-        'delete.errorPending': 'This session still has unmaterialized content. Close its tab or retry shortly.',
-        'delete.closeTab': 'Close its tab',
-        'delete.closeTabHint': '(switches to a blank view; close any other tabs holding this session manually)',
+        'delete.errorActivity': 'This session still has work in progress; tick Force delete to stop it and delete outright.',
+        'delete.errorLive': 'This session is running or still open; tick Force delete to delete it outright.',
+        'delete.errorRelease': 'This session is held open by its tab and could not be released automatically. Close the tab and retry.',
+        'delete.errorPending': 'This session still has unmaterialized content. Retry shortly.',
         'delete.errorDisk': 'The session log could not be removed; the registry was left untouched. Retry shortly.',
         'delete.errorNotFound': 'No session record was found; it may already be deleted.',
         cancel: 'Cancel',
@@ -108,14 +104,6 @@ window.__ModuleLoader__.load({
       return text;
     }
 
-    /**
-     * Close the main conversation view (the same public layout action the
-     * client performs when a tab closes) — the only clean exit for a live
-     * session: releasing it natively drops the row from the desktop sidebar
-     * and pushes session/disposed to the phone bridge. Only offered when the
-     * row is actually retained by this page's main view (checked via the
-     * standard useSessions hook the slot renderer injects).
-     */
     /** Same-origin POST to this package's host route. */
     async function callDelete(sessionId, force) {
       const response = await fetch(ROUTE, {
@@ -184,7 +172,7 @@ window.__ModuleLoader__.load({
      * one confirmation dialog. Markup mirrors the host Modal primitive
      * (renamed classes under this plugin's prefix; only --dsw-alias-* tokens).
      */
-    function DeleteSessionOverlay(props) {
+    function DeleteSessionOverlay() {
       const request = React.useSyncExternalStore(
         (onStoreChange) => requestStore.subscribe(onStoreChange),
         () => requestStore.getSnapshot(),
@@ -192,20 +180,12 @@ window.__ModuleLoader__.load({
       const [deleting, setDeleting] = React.useState(false);
       const [error, setError] = React.useState(null);
       const [force, setForce] = React.useState(false);
-      // The refusal said "close the tab first": surface the one-click exit.
-      const [needsTab, setNeedsTab] = React.useState(false);
-      // Standard sessions hook the shell injects into every slot entry: does
-      // THIS page's main view hold the session open right now?
-      const openHere = props.useSessions
-        ? props.useSessions((s) => (request === null ? false : (s.byId[request.sessionId]?.retainedBy?.mainView ?? 0) > 0))
-        : false;
 
       // Reset the transient dialog state whenever a new request arrives.
       React.useEffect(() => {
         setDeleting(false);
         setError(null);
         setForce(false);
-        setNeedsTab(false);
       }, [request?.sessionId, request?.seq]);
 
       // Publish the in-flight flag onto the pending request so the frame-level
@@ -233,13 +213,15 @@ window.__ModuleLoader__.load({
           .catch((reason) => {
             setDeleting(false);
             const code = reason?.code;
-            if (code === 'open-tab' || code === 'live-session') { setError(t('delete.errorLive')); setNeedsTab(true); }
-            else if (code === 'live-running') { setError(t('delete.errorRunning')); setNeedsTab(true); }
-            else if (code === 'activity') { setError(t('delete.errorActivity')); setNeedsTab(false); }
-            else if (code === 'pending-session') { setError(t('delete.errorPending')); setNeedsTab(false); }
-            else if (code === 'disk-remove-failed' || code === 'catalog-unavailable') { setError(t('delete.errorDisk')); setNeedsTab(false); }
-            else if (code === 'not-found') { setError(t('delete.errorNotFound')); setNeedsTab(false); }
-            else { setError(reason instanceof Error ? reason.message : String(reason)); setNeedsTab(false); }
+            if (code === 'live-session') setError(t('delete.errorLive'));
+            else if (code === 'release-failed') setError(t('delete.errorRelease'));
+            else if (code === 'activity') setError(t('delete.errorActivity'));
+            else if (code === 'pending-session') setError(t('delete.errorPending'));
+            else if (code === 'disk-remove-failed') setError(t('delete.errorDisk'));
+            else if (code === 'not-found') setError(t('delete.errorNotFound'));
+            // 'catalog-unavailable' and any other failure: the server message
+            // is the most honest text we have; show it verbatim.
+            else setError(reason instanceof Error ? reason.message : String(reason));
           });
       };
 
@@ -271,19 +253,8 @@ window.__ModuleLoader__.load({
           h('div', { className: `${CSS_PREFIX}__modalBody` },
             deleting ? h('div', { className: `${CSS_PREFIX}__status`, role: 'status' }, t('delete.pending')) : null,
             error !== null ? h('div', { className: `${CSS_PREFIX}__error`, role: 'alert' }, error) : null,
-            // One-click exit for the "tab is open" refusal: closing the main
-            // view releases the session natively (agent teardown, handle
-            // close, session/disposed → desktop row and phone list both drop).
-            !deleting && needsTab && openHere && h('div', { className: `${CSS_PREFIX}__tabRow` },
-              h('button', {
-                type: 'button',
-                className: `${CSS_PREFIX}__btn ${CSS_PREFIX}__btnOutline ${CSS_PREFIX}__btnSm`,
-                onClick: () => { props.layout?.selectPanel?.(null); },
-              }, t('delete.closeTab')),
-              h('span', { className: `${CSS_PREFIX}__tabHint` }, t('delete.closeTabHint')),
-            ),
             // The force checkbox stays visible beside any refusal (notably
-            // background work): the refusal IS the moment force helps, so
+            // live-session): the refusal IS the moment force helps, so
             // hiding it forces a close-and-reopen cycle to recover.
             !deleting && h('label', { className: `${CSS_PREFIX}__forceLabel` },
               h('input', {
@@ -481,25 +452,6 @@ window.__ModuleLoader__.load({
   color: #fff;
 }
 .${CSS_PREFIX}__btnDanger:hover:not(:disabled) { filter: brightness(1.06); }
-.${CSS_PREFIX}__tabRow {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-.${CSS_PREFIX}__btnSm {
-  height: 28px;
-  font-size: 12px;
-  line-height: 18px;
-  padding: 0 10px;
-  border-radius: var(--dsw-radius-sm, 4px);
-}
-.${CSS_PREFIX}__tabHint {
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-tertiary);
-}
 .${CSS_PREFIX}__forceLabel {
   display: flex;
   align-items: center;
@@ -528,7 +480,7 @@ window.__ModuleLoader__.load({
     let seq = 0;
 
     return {
-      inject: ['slots', 'locale', 'layout'],
+      inject: ['slots', 'locale'],
       apply(ctx) {
         requestStore = createStore(null);
         seq = 0;
@@ -584,14 +536,11 @@ window.__ModuleLoader__.load({
           }),
         }, DeleteSessionMenuItem));
 
-        // The confirmation dialog over the whole frame. `layout` rides in as
-        // the entry's business share so the refusal path can offer the
-        // one-click tab release (selectPanel(null) = close the main view).
+        // The confirmation dialog over the whole frame.
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
           id: 'session-delete-confirm',
           order: 30,
-          inject: () => ({ layout: ctx.get('layout') }),
         }, DeleteSessionOverlay));
       },
     };
