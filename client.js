@@ -218,6 +218,28 @@ window.__ModuleLoader__.load({
 
       const waitMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+      // Replicate the native tab-close: uiWorkspace.archiveSession, when the
+      // archived session is the open main view, runs clearMain() — release
+      // the mainView retain FIRST, then selectPanel(null). v1.2.2 only did
+      // the panel switch, so the retain was never let go and the host always
+      // timed out. Archive-then-unarchive (both durable-idempotent; archive
+      // refuses while work runs, so a busy session stays untouched and the
+      // retry surfaces the honest activity error) buys exactly that release.
+      const silentRelease = async (sessionId) => {
+        const ws = props.uiWorkspace;
+        if (ws === undefined || typeof ws.archiveSession !== 'function' || typeof ws.unarchiveSession !== 'function') {
+          try { props.layout?.selectPanel?.(null); } catch { /* attempts report */ }
+          return;
+        }
+        try {
+          await ws.archiveSession(sessionId);
+          await ws.unarchiveSession(sessionId);
+        } catch {
+          // Refused (running work) or threw: nothing changed; the next
+          // attempt's error code tells the user what happened.
+        }
+      };
+
       // One delete attempt; on a force-request that the host refused for a
       // still-held session, silently release the main view first (the same
       // un-retain the user's own tab-close performs — no user concept), then
@@ -230,12 +252,13 @@ window.__ModuleLoader__.load({
           const code = reason?.code;
           const held = code === 'release-failed' || code === 'live-session';
           if (force && held && stage === 0) {
+            await silentRelease(request.sessionId);
             try { props.layout?.selectPanel?.(null); } catch { /* retry still may land */ }
-            await waitMs(500);
+            await waitMs(600);
             return attemptDelete(1);
           }
           if (force && held && stage === 1) {
-            await waitMs(1200);
+            await waitMs(1500);
             return attemptDelete(2);
           }
           setDeleting(false);
@@ -260,8 +283,9 @@ window.__ModuleLoader__.load({
         // attempt instead of eating a guaranteed 409 round-trip.
         if (force && openHere) {
           (async () => {
+            await silentRelease(request.sessionId);
             try { props.layout?.selectPanel?.(null); } catch { /* first attempt reports */ }
-            await waitMs(500);
+            await waitMs(600);
             await attemptDelete(1);
           })();
           return;
@@ -580,15 +604,17 @@ window.__ModuleLoader__.load({
           }),
         }, DeleteSessionMenuItem));
 
-        // The confirmation dialog over the whole frame. `layout` rides in as
-        // the entry's business share so a force delete can silently release
-        // this page's main view (selectPanel(null)) — the same un-retain the
-        // user's own tab-close performs — instead of eating a refusal.
+        // The confirmation dialog over the whole frame. `layout` and
+        // `uiWorkspace` ride in as the entry's business share so a force
+        // delete can drive the native tab-close (clearMain: release the
+        // mainView retain then selectPanel(null)) without any user concept.
+        // ctx.get is the sanctioned lookup: it yields undefined (graceful
+        // degrade) instead of throwing when a profile lacks the service.
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({
           name: 'shell.overlay',
           id: 'session-delete-confirm',
           order: 30,
-          inject: () => ({ layout: ctx.get('layout') }),
+          inject: () => ({ layout: ctx.get('layout'), uiWorkspace: ctx.get('uiWorkspace') }),
         }, DeleteSessionOverlay));
       },
     };
