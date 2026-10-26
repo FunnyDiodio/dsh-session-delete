@@ -155,32 +155,59 @@ function isLiveSession(ctx, sessionId) {
 }
 
 /**
- * Force-release a live session. The primary path is the caller's client:
- * a force delete silently releases this page's main view first (the same
- * un-retain a tab close drives), and the settle window below waits for that
- * round trip to land in this process. Secondary: an Agent object that
- * exposes its own public `dispose`. NEVER probe `agent.ctx.<anything>` — the
- * Cordis context proxy throws `cannot get property "x" without inject` for
- * undeclared names, even under typeof.
- * The native `session/disposed` → `api-session/removed` chain drops the row
- * from every connected client as part of the release, so the disk sweep
- * afterwards can never strand a ghost row.
+ * Force-release a live session, logging every step so a failure is readable
+ * from the host log alone (no guessing rounds). The primary path is the
+ * caller's client driving the native tab-close (uiWorkspace archive →
+ * clearMain); the client reports what it did via `diag`. Secondary: an
+ * Agent object's own public `dispose`, capped at 2.5s so a hang cannot eat
+ * the settle window. NEVER probe `agent.ctx.<anything>` — the Cordis context
+ * proxy throws `cannot get property "x" without inject` even under typeof.
  * @returns true once the session is out of the live catalog.
  */
-async function releaseLiveSession(ctx, sessionId) {
+async function releaseLiveSession(ctx, sessionId, diag) {
+  const steps = [];
+  let agent;
   try {
-    const agent = ctx.get('agents')?.get(sessionId);
-    if (agent !== void 0 && typeof agent.dispose === 'function') await agent.dispose();
+    agent = ctx.get('agents')?.get(sessionId);
   } catch (error) {
-    ctx.logger?.warn?.(`[${NS}] releasing live session '${sessionId}' failed: ${String(error?.message ?? error)}`);
+    steps.push(`agent lookup threw: ${String(error?.message ?? error)}`);
+  }
+  steps.push(`agent=${agent === void 0 ? 'absent' : 'present'}`);
+  if (agent !== void 0 && typeof agent.dispose === 'function') {
+    const inflight = Promise.resolve().then(() => agent.dispose());
+    inflight.catch(() => { /* a late rejection after the cap is not a crash */ });
+    try {
+      await Promise.race([
+        inflight,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout 2500ms')), 2500)),
+      ]);
+      steps.push('dispose ok');
+    } catch (error) {
+      steps.push(`dispose ${String(error?.message ?? error)}`);
+    }
+  } else if (agent !== void 0) {
+    steps.push('agent has no dispose()');
   }
   // Store removal rides the disposal/un-retain listener chain (local emit or
   // a loopback remote call); give it a bounded settle window before declaring.
+  let stillLive = true;
   for (let attempt = 0; attempt < 40; attempt++) {
-    if (!isLiveSession(ctx, sessionId)) return true;
+    if (!isLiveSession(ctx, sessionId)) { stillLive = false; break; }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  return !isLiveSession(ctx, sessionId);
+  let liveIds = '';
+  let catalogError = '';
+  try {
+    const sessions = ctx.get('sessions');
+    liveIds = (sessions?.list?.() ?? []).map((s) => String(s.id).slice(-6)).join(',');
+  } catch (error) {
+    catalogError = String(error?.message ?? error);
+  }
+  ctx.logger?.info?.(
+    `[${NS}] release '${sessionId}': clientDiag=${diag ?? '-'} | ${steps.join('; ')} | stillLive=${stillLive}`
+    + ` | liveCatalog=[${liveIds}]${catalogError ? ` | catalogError=${catalogError}` : ''}`,
+  );
+  return !stillLive;
 }
 
 /**
@@ -295,6 +322,10 @@ export function apply(ctx) {
           const body = await readJsonBody(req);
           const sessionId = assertPayload(body);
           const force = body.force === true;
+          // The client reports what its silent-release attempt actually did
+          // (service present? threw?) so the host log line explains a
+          // release-failed without another guess-and-check round.
+          const diag = typeof body.diag === 'string' ? body.diag.slice(0, 400) : undefined;
 
           // A session live in this process (its tab is open / an Agent is
           // attached) may not have its log pulled out from under the open
@@ -309,7 +340,7 @@ export function apply(ctx) {
               send(409, { ok: false, error: 'live-session', message: 'session is live in this process' });
               return;
             }
-            if (!(await releaseLiveSession(ctx, sessionId))) {
+            if (!(await releaseLiveSession(ctx, sessionId, diag))) {
               send(409, { ok: false, error: 'release-failed', message: 'session is held open by its tab and could not be released; close the tab and retry' });
               return;
             }

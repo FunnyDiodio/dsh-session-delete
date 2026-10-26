@@ -105,11 +105,11 @@ window.__ModuleLoader__.load({
     }
 
     /** Same-origin POST to this package's host route. */
-    async function callDelete(sessionId, force) {
+    async function callDelete(sessionId, force, diag) {
       const response = await fetch(ROUTE, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ sessionId, force: force === true }),
+        body: JSON.stringify({ sessionId, force: force === true, ...(diag ? { diag: String(diag).slice(0, 400) } : {}) }),
       });
       let body;
       try {
@@ -180,6 +180,8 @@ window.__ModuleLoader__.load({
       const [deleting, setDeleting] = React.useState(false);
       const [error, setError] = React.useState(null);
       const [force, setForce] = React.useState(false);
+      // What the silent release did this attempt, reported to the host log.
+      let releaseDiag = 'no-release-attempted';
       // Standard slot hook from the shell: is THIS page's main view holding
       // the pending session open? (Force delete silently releases it first.)
       // Call the hook UNCONDITIONALLY every render (Rules of Hooks: a
@@ -225,18 +227,21 @@ window.__ModuleLoader__.load({
       // timed out. Archive-then-unarchive (both durable-idempotent; archive
       // refuses while work runs, so a busy session stays untouched and the
       // retry surfaces the honest activity error) buys exactly that release.
+      // Records what it saw into `releaseDiag` so the host request can carry
+      // the client-side truth (one failed guess-and-check cycle per log line).
       const silentRelease = async (sessionId) => {
         const ws = props.uiWorkspace;
         if (ws === undefined || typeof ws.archiveSession !== 'function' || typeof ws.unarchiveSession !== 'function') {
+          releaseDiag = `no-uiWorkspace(service=${ws === undefined ? 'absent' : 'shape-mismatch'});panel-switch-only`;
           try { props.layout?.selectPanel?.(null); } catch { /* attempts report */ }
           return;
         }
         try {
           await ws.archiveSession(sessionId);
           await ws.unarchiveSession(sessionId);
-        } catch {
-          // Refused (running work) or threw: nothing changed; the next
-          // attempt's error code tells the user what happened.
+          releaseDiag = 'archive+unarchive ok';
+        } catch (reason) {
+          releaseDiag = `archive threw: ${String(reason?.message ?? reason).slice(0, 120)}`;
         }
       };
 
@@ -246,7 +251,7 @@ window.__ModuleLoader__.load({
       // retry with a settle delay. Stage caps at 2 to keep failures honest.
       const attemptDelete = async (stage) => {
         try {
-          await callDelete(request.sessionId, force);
+          await callDelete(request.sessionId, force, releaseDiag);
           requestStore.set(null);
         } catch (reason) {
           const code = reason?.code;
