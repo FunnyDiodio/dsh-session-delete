@@ -155,59 +155,74 @@ function isLiveSession(ctx, sessionId) {
 }
 
 /**
- * Force-release a live session, logging every step so a failure is readable
- * from the host log alone (no guessing rounds). The primary path is the
- * caller's client driving the native tab-close (uiWorkspace archive →
- * clearMain); the client reports what it did via `diag`. Secondary: an
- * Agent object's own public `dispose`, capped at 2.5s so a hang cannot eat
- * the settle window. NEVER probe `agent.ctx.<anything>` — the Cordis context
- * proxy throws `cannot get property "x" without inject` even under typeof.
- * @returns true once the session is out of the live catalog.
+ * Force-release a live session. Field diagnostics (v1.2.6) proved the tab
+ * un-retain alone never clears the HOST-side live entry: DSH keeps a resumed
+ * Agent resident for the process lifetime and exposes no public per-agent
+ * dispose — so waiting on retain-drop is a dead end, and the resident entry
+ * re-publishes rows on later reloads (the resurrection users reported).
+ *
+ * The legitimate exit is the driver's OWN fiber: each agent runs under a
+ * per-agent Cordis fiber whose disposal executes the official teardown
+ * (scope.rawDispose → close persistence handle → detachAgent → detachSession
+ * → session/disposed). `fiber` is an own data property of the context
+ * object, so reading it does NOT hit the inject-proxy trap that threw for
+ * undeclared service names. Cancel first so no turn appends mid-teardown.
+ *
+ * @returns true when the host live catalog really dropped the entry.
  */
-async function releaseLiveSession(ctx, sessionId, diag) {
-  const steps = [];
+async function quietAndReleaseLive(ctx, sessionId, diag) {
+  const notes = [];
   let agent;
   try {
     agent = ctx.get('agents')?.get(sessionId);
   } catch (error) {
-    steps.push(`agent lookup threw: ${String(error?.message ?? error)}`);
+    notes.push(`agent lookup threw: ${String(error?.message ?? error).slice(0, 80)}`);
   }
-  steps.push(`agent=${agent === void 0 ? 'absent' : 'present'}`);
-  if (agent !== void 0 && typeof agent.dispose === 'function') {
-    const inflight = Promise.resolve().then(() => agent.dispose());
-    inflight.catch(() => { /* a late rejection after the cap is not a crash */ });
+  notes.push(`agent=${agent === void 0 ? 'absent' : 'present'}`);
+  if (agent !== void 0) {
     try {
-      await Promise.race([
-        inflight,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout 2500ms')), 2500)),
-      ]);
-      steps.push('dispose ok');
+      if (typeof agent.cancel === 'function') {
+        await Promise.race([
+          Promise.resolve().then(() => agent.cancel({ kind: 'user' })),
+          new Promise((resolve) => setTimeout(resolve, 1000)),
+        ]);
+        notes.push('cancelled');
+      }
     } catch (error) {
-      steps.push(`dispose ${String(error?.message ?? error)}`);
+      notes.push(`cancel threw: ${String(error?.message ?? error).slice(0, 80)}`);
     }
-  } else if (agent !== void 0) {
-    steps.push('agent has no dispose()');
+    try {
+      const fiber = agent.ctx?.fiber;
+      if (fiber !== void 0 && typeof fiber.dispose === 'function') {
+        // Fiber.dispose settles once the plugin's cleanup chain (the agent
+        // teardown effects: cancel → close handle → detachAgent → detachSession)
+        // finished; race a cap so a stalled effect cannot hang the route.
+        await Promise.race([
+          Promise.resolve(fiber.dispose()),
+          new Promise((resolve) => setTimeout(resolve, 4000)),
+        ]);
+        notes.push('fiber disposed');
+      } else {
+        notes.push('agent ctx has no fiber.dispose');
+      }
+    } catch (error) {
+      notes.push(`fiber dispose threw: ${String(error?.message ?? error).slice(0, 80)}`);
+    }
   }
-  // Store removal rides the disposal/un-retain listener chain (local emit or
-  // a loopback remote call); give it a bounded settle window before declaring.
-  let stillLive = true;
-  for (let attempt = 0; attempt < 40; attempt++) {
-    if (!isLiveSession(ctx, sessionId)) { stillLive = false; break; }
+  // Store removal rides the teardown listener chain; bounded settle window.
+  let released = false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    if (!isLiveSession(ctx, sessionId)) { released = true; break; }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   let liveIds = '';
-  let catalogError = '';
   try {
-    const sessions = ctx.get('sessions');
-    liveIds = (sessions?.list?.() ?? []).map((s) => String(s.id).slice(-6)).join(',');
-  } catch (error) {
-    catalogError = String(error?.message ?? error);
-  }
+    liveIds = (ctx.get('sessions')?.list?.() ?? []).map((s) => String(s.id).slice(-6)).join(',');
+  } catch { /* diagnostics-only */ }
   ctx.logger?.info?.(
-    `[${NS}] release '${sessionId}': clientDiag=${diag ?? '-'} | ${steps.join('; ')} | stillLive=${stillLive}`
-    + ` | liveCatalog=[${liveIds}]${catalogError ? ` | catalogError=${catalogError}` : ''}`,
+    `[${NS}] force-release '${sessionId}': clientDiag=${diag ?? '-'} | ${notes.join('; ')} | released=${released} | liveCatalog=[${liveIds}]`,
   );
-  return !stillLive;
+  return released;
 }
 
 /**
@@ -327,21 +342,19 @@ export function apply(ctx) {
           // release-failed without another guess-and-check round.
           const diag = typeof body.diag === 'string' ? body.diag.slice(0, 400) : undefined;
 
-          // A session live in this process (its tab is open / an Agent is
-          // attached) may not have its log pulled out from under the open
-          // persistence handle — v1.1 did exactly that and stranded ghost
-          // "Ungrouped" rows on desktop and phone alike. With force the
-          // plugin now RELEASES the session through the Agent's own public
-          // teardown first (same path a tab close drives; clients drop the
-          // row during the release) and only then deletes; without force a
-          // live session is refused.
+          // A session live in this process may not have its log pulled out
+          // from under an open persistence handle. With force, the plugin
+          // now QUITS the session's own runtime through the official per-agent
+          // fiber teardown (the same chain a tab close ultimately drives) and
+          // only proceeds once the host live catalog really dropped it;
+          // without force a live session is refused as before.
           if (isLiveSession(ctx, sessionId)) {
             if (!force) {
               send(409, { ok: false, error: 'live-session', message: 'session is live in this process' });
               return;
             }
-            if (!(await releaseLiveSession(ctx, sessionId, diag))) {
-              send(409, { ok: false, error: 'release-failed', message: 'session is held open by its tab and could not be released; close the tab and retry' });
+            if (!(await quietAndReleaseLive(ctx, sessionId, diag))) {
+              send(409, { ok: false, error: 'release-failed', message: 'session could not be released from memory; close its tab and retry' });
               return;
             }
           }
