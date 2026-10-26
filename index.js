@@ -155,20 +155,24 @@ function isLiveSession(ctx, sessionId) {
 }
 
 /**
- * Force-release a live session. Field diagnostics (v1.2.6) proved the tab
- * un-retain alone never clears the HOST-side live entry: DSH keeps a resumed
- * Agent resident for the process lifetime and exposes no public per-agent
- * dispose — so waiting on retain-drop is a dead end, and the resident entry
- * re-publishes rows on later reloads (the resurrection users reported).
+ * Force-release a live session. Field diagnostics settled the design:
+ * neither the tab un-retain (v1.2.6: `archive+unarchive ok, stillLive=true`)
+ * nor disposing the agent's own fiber (v1.2.7: `fiber disposed,
+ * released=false` — the teardown chain rides a fiber the plugin cannot
+ * reach) ever drops the host live entry; DSH keeps a resumed session
+ * resident for the process lifetime.
  *
- * The legitimate exit is the driver's OWN fiber: each agent runs under a
- * per-agent Cordis fiber whose disposal executes the official teardown
- * (scope.rawDispose → close persistence handle → detachAgent → detachSession
- * → session/disposed). `fiber` is an own data property of the context
- * object, so reading it does NOT hit the inject-proxy trap that threw for
- * undeclared service names. Cancel first so no turn appends mid-teardown.
+ * The one legitimate lever left is the catalog itself: `Sessions` carries
+ * JSDoc'd removal primitives (`liveEntryFor(session)` + the paired
+ * `detachEntered(entry)` that deletes the store entry and emits
+ * `session/disposed`). sessionController forwards that as
+ * `api-session/removed`, so every connected surface — sidebar and phone
+ * bridge — drops the row, and the next full list (disk + live catalog)
+ * cannot resurrect it because the durable log is removed in the same
+ * request. The orphaned Agent handle stays quiet (its turn was cancelled)
+ * until the next process restart reaps it.
  *
- * @returns true when the host live catalog really dropped the entry.
+ * @returns true when the session left the live catalog.
  */
 async function quietAndReleaseLive(ctx, sessionId, diag) {
   const notes = [];
@@ -178,7 +182,6 @@ async function quietAndReleaseLive(ctx, sessionId, diag) {
   } catch (error) {
     notes.push(`agent lookup threw: ${String(error?.message ?? error).slice(0, 80)}`);
   }
-  notes.push(`agent=${agent === void 0 ? 'absent' : 'present'}`);
   if (agent !== void 0) {
     try {
       if (typeof agent.cancel === 'function') {
@@ -191,36 +194,39 @@ async function quietAndReleaseLive(ctx, sessionId, diag) {
     } catch (error) {
       notes.push(`cancel threw: ${String(error?.message ?? error).slice(0, 80)}`);
     }
-    try {
-      const fiber = agent.ctx?.fiber;
-      if (fiber !== void 0 && typeof fiber.dispose === 'function') {
-        // Fiber.dispose settles once the plugin's cleanup chain (the agent
-        // teardown effects: cancel → close handle → detachAgent → detachSession)
-        // finished; race a cap so a stalled effect cannot hang the route.
-        await Promise.race([
-          Promise.resolve(fiber.dispose()),
-          new Promise((resolve) => setTimeout(resolve, 4000)),
-        ]);
-        notes.push('fiber disposed');
-      } else {
-        notes.push('agent ctx has no fiber.dispose');
-      }
-    } catch (error) {
-      notes.push(`fiber dispose threw: ${String(error?.message ?? error).slice(0, 80)}`);
-    }
   }
-  // Store removal rides the teardown listener chain; bounded settle window.
+  // Direct catalog removal: the live entry leaves through the service's own
+  // documented detach pair, firing session/disposed downstream.
+  try {
+    const sessions = ctx.get('sessions');
+    const live = sessions?.get?.(sessionId);
+    if (live !== void 0 && typeof sessions.liveEntryFor === 'function' && typeof sessions.detachEntered === 'function') {
+      sessions.detachEntered(sessions.liveEntryFor(live));
+      notes.push('entry detached');
+    } else if (live !== void 0) {
+      notes.push('sessions lacks detach pair (version shape change)');
+    } else {
+      notes.push('already-not-live');
+    }
+  } catch (error) {
+    notes.push(`detach threw: ${String(error?.message ?? error).slice(0, 120)}`);
+  }
   let released = false;
-  for (let attempt = 0; attempt < 30; attempt++) {
+  for (let attempt = 0; attempt < 10; attempt++) {
     if (!isLiveSession(ctx, sessionId)) { released = true; break; }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  let agentResidue = false;
+  try {
+    agentResidue = ctx.get('agents')?.get(sessionId) !== void 0;
+  } catch { /* diagnostics-only */ }
   let liveIds = '';
   try {
     liveIds = (ctx.get('sessions')?.list?.() ?? []).map((s) => String(s.id).slice(-6)).join(',');
   } catch { /* diagnostics-only */ }
   ctx.logger?.info?.(
-    `[${NS}] force-release '${sessionId}': clientDiag=${diag ?? '-'} | ${notes.join('; ')} | released=${released} | liveCatalog=[${liveIds}]`,
+    `[${NS}] force-release '${sessionId}': clientDiag=${diag ?? '-'} | ${notes.join('; ')} | released=${released}`
+    + ` | agentResidue=${agentResidue ? 'yes (quiet until restart)' : 'no'} | liveCatalog=[${liveIds}]`,
   );
   return released;
 }
