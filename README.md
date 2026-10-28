@@ -29,15 +29,17 @@ English | 中文（下文为主，文末有 English summary）
 - 侧边栏每个会话行的"…"菜单新增红色**删除会话**行（位于"归档会话"之下），带垃圾桶图标、危险配色
 - 确认对话框说明删除后果；对话框内含**强制删除**复选框（默认不勾选）
   - 普通删除：拒绝正在生成回复 / 有后台工作 / 有未落盘内容的会话，提示直接引导勾选强制删除
-  - 勾选强制：先通过会话自身 Agent 的公开退场链把它**从内存中释放**（停止回复、释放日志句柄，
-    并原生触发 `session/disposed` —— 桌面与手机端的行此刻即消失），再停掉后台工作（子代理 /
+  - 勾选强制：先把会话从宿主内存中逐出（取消生成、释放日志句柄，原生触发
+    `session/disposed` → 桌面侧栏该行即刻消失），再停掉后台工作（子代理 /
     后台任务 / 定时提醒，与官方"停止并归档"同一机制），最后彻底删除：磁盘日志 + 投影缓存 +
-    注册表记账全部清除，**不留幽灵行**
+    注册表记账全部清除，**本机不留幽灵行**
   - 极端情况下若会话被其标签页持锁无法自动释放，才提示关闭该标签页后重试（罕见兜底，非常规步骤）
   - 被拒绝后复选框**保持可见**，当场勾选重试即可，无需关窗重开
-- 删除成功后：已连接的所有客户端界面**即时**移除该行（无需重启）；磁盘上的会话日志目录、
+- 删除成功后：所有已连接的 DSH Web 界面**即时**移除该行（无需重启）；磁盘上的会话日志目录、
   投影缓存文件被清除；工作区归属 / 置顶 / 归档记账一并清理
 - 记录已丢失的"幽灵行"（历史版本遗留）再次点删除也能回收：按会话 id 清扫所有项目目录
+- 注意：第三方云端镜像（如经 Agents Anywhere 同步的手机 App）持有自己的副本，本地删除
+  触及不到——请在对应 App 内管理
 
 ## 安全护栏
 
@@ -93,12 +95,14 @@ MIT — 见 [LICENSE](LICENSE)。
 DeepSeek Harness (official clients have archive/pin/rename/fork only — there is no durable delete).
 
 - Confirmation dialog with a **Force delete** checkbox that stays visible next to refusal
-  errors. Force deletes in one click, no user-side ritual: it first releases the session
-  through its Agent's public teardown (stops generation, frees the log handle, and the
-  native disposal event drops the row on desktop and phone alike), stops background work
+  errors. Force deletes in one click, no user-side ritual: it first ejects the session
+  from the host's live catalog (cancels generation, frees the log handle, and the
+  native disposal event drops the sidebar row immediately), stops background work
   (subagents / jobs / schedules — same mechanism as the shipped "stop and archive"), then
   removes everything. Only the rare case where a tab holds the session so tightly it
   cannot be released asks the user to close it.
+  Note: third-party cloud mirrors (e.g. phone apps synced via Agents Anywhere) keep
+  their own copies; local deletion cannot reach them — manage those in the app itself.
 - **Conversation logs are permanently deleted** — invisible to every other session and to the
   model. Back up what matters *before* deleting: have the agent condense a summary into a
   workspace file, or export the session log.
